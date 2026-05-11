@@ -14,13 +14,9 @@ env:
   BACKUP_ROOT: 'C:\deployments\backups'
 
 jobs:
-  # ─────────────────────────────────────────────────────────
-  # JOB 1 — BUILD
-  # ─────────────────────────────────────────────────────────
   build:
     name: Build & Publish
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -49,9 +45,6 @@ jobs:
           path: publish.zip
           retention-days: 5
 
-  # ─────────────────────────────────────────────────────────
-  # JOB 2 — DEPLOY
-  # ─────────────────────────────────────────────────────────
   deploy:
     name: Deploy to SIRIUS1
     runs-on: ubuntu-latest
@@ -68,6 +61,22 @@ jobs:
       - name: Unzip published output
         run: unzip publish.zip
 
+      - name: Prepare incoming folder on SIRIUS1
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: 22
+          shell: powershell
+          script: |
+            $incoming = "C:\deployments\incoming"
+            $backups  = "C:\deployments\backups"
+            if (Test-Path $incoming) { Remove-Item -Recurse -Force $incoming }
+            New-Item -ItemType Directory -Path $incoming | Out-Null
+            if (!(Test-Path $backups)) { New-Item -ItemType Directory -Path $backups | Out-Null }
+            Write-Host "Folders ready."
+
       - name: Upload files to SIRIUS1 via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -79,7 +88,6 @@ jobs:
           target: "C:/deployments/incoming"
           strip_components: 1
           overwrite: true
-          rm: true
 
       - name: Run deployment script on SIRIUS1 via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -110,7 +118,6 @@ jobs:
             Start-Sleep -Seconds 2
 
             Write-Host "[2/6] Backing up current version..."
-            if (!(Test-Path $backupRoot)) { New-Item -ItemType Directory -Path $backupRoot | Out-Null }
             if (Test-Path $deployPath) {
               Copy-Item -Recurse -Force $deployPath $backupPath
               Write-Host "      Backup saved: $backupPath"
