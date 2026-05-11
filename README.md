@@ -6,7 +6,7 @@ Automated deployment of StopwatchApp to IIS on SIRIUS1 via GitHub Actions + WinR
 - **App:** ASP.NET Core 8 / Blazor Server
 - **Server:** SIRIUS1 (Windows Server + IIS)
 - **Domain:** ouaail-stopwatch.ms-strategies.com
-- **CI/CD:** GitHub Actions + WinRM
+- **CI/CD:** GitHub Actions 
 
 ## How it works
 
