@@ -12,12 +12,15 @@ env:
   SITE_NAME: 'ouaail-stopwatch'
   DEPLOY_PATH: 'C:\inetpub\wwwroot\ouaail-stopwatch'
   BACKUP_ROOT: 'C:\deployments\backups'
-  INCOMING_PATH: 'C:\deployments\incoming'
 
 jobs:
+  # ─────────────────────────────────────────────────────────
+  # JOB 1 — BUILD
+  # ─────────────────────────────────────────────────────────
   build:
     name: Build & Publish
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -46,9 +49,12 @@ jobs:
           path: publish.zip
           retention-days: 5
 
+  # ─────────────────────────────────────────────────────────
+  # JOB 2 — DEPLOY
+  # ─────────────────────────────────────────────────────────
   deploy:
     name: Deploy to SIRIUS1
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     needs: build
     environment: production
     if: github.ref == 'refs/heads/main'
@@ -60,48 +66,30 @@ jobs:
           name: stopwatch-published
 
       - name: Unzip published output
-        run: Expand-Archive -Path publish.zip -DestinationPath . -Force
+        run: unzip publish.zip
 
-      - name: Upload files to SIRIUS1 via WinRM
-        shell: pwsh
-        env:
-          SERVER_HOST:     ${{ secrets.SERVER_HOST }}
-          SERVER_USER:     ${{ secrets.SERVER_USER }}
-          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
-        run: |
-          winrm set winrm/config/client '@{AllowUnencrypted="true"}'
-          winrm set winrm/config/client/auth '@{Basic="true"}'
-          Set-Item WSMan:\localhost\Client\TrustedHosts -Value $env:SERVER_HOST -Force
-          $password   = ConvertTo-SecureString $env:SERVER_PASSWORD -AsPlainText -Force
-          $credential = New-Object System.Management.Automation.PSCredential($env:SERVER_USER, $password)
-          $sessionOptions = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
-          $session = New-PSSession -ComputerName $env:SERVER_HOST -Credential $credential -Authentication Basic -SessionOption $sessionOptions -Port 5985
+      - name: Upload files to SIRIUS1 via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: 22
+          source: "publish/*"
+          target: "C:/deployments/incoming"
+          strip_components: 1
+          overwrite: true
+          rm: true
 
-          Write-Host "Connected to SIRIUS1."
-
-          Invoke-Command -Session $session -ScriptBlock {
-            $incoming = "C:\deployments\incoming"
-            if (Test-Path $incoming) { Remove-Item -Recurse -Force $incoming }
-            New-Item -ItemType Directory -Path $incoming | Out-Null
-          }
-
-          Copy-Item -Path ".\publish\*" -Destination "C:\deployments\incoming" -ToSession $session -Recurse -Force
-          Write-Host "Files uploaded."
-          Remove-PSSession $session
-
-      - name: Run deployment on SIRIUS1
-        shell: pwsh
-        env:
-          SERVER_HOST:     ${{ secrets.SERVER_HOST }}
-          SERVER_USER:     ${{ secrets.SERVER_USER }}
-          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
-        run: |
-          $password   = ConvertTo-SecureString $env:SERVER_PASSWORD -AsPlainText -Force
-          $credential = New-Object System.Management.Automation.PSCredential($env:SERVER_USER, $password)
-          $sessionOptions = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
-          $session = New-PSSession -ComputerName $env:SERVER_HOST -Credential $credential -Authentication Basic -SessionOption $sessionOptions -Port 5985
-
-          Invoke-Command -Session $session -ScriptBlock {
+      - name: Run deployment script on SIRIUS1 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: 22
+          shell: powershell
+          script: |
             $siteName   = "ouaail-stopwatch"
             $deployPath = "C:\inetpub\wwwroot\ouaail-stopwatch"
             $sourcePath = "C:\deployments\incoming"
@@ -110,7 +98,8 @@ jobs:
             $backupPath = "$backupRoot\$siteName`_$timestamp"
 
             Write-Host "=========================================="
-            Write-Host " Deploying: $siteName | $timestamp"
+            Write-Host " Deploying: $siteName"
+            Write-Host " Timestamp: $timestamp"
             Write-Host "=========================================="
 
             Import-Module WebAdministration
@@ -124,15 +113,21 @@ jobs:
             if (!(Test-Path $backupRoot)) { New-Item -ItemType Directory -Path $backupRoot | Out-Null }
             if (Test-Path $deployPath) {
               Copy-Item -Recurse -Force $deployPath $backupPath
-              Write-Host "      Backup: $backupPath"
+              Write-Host "      Backup saved: $backupPath"
+            } else {
+              Write-Host "      No existing files, skipping backup."
             }
 
             Write-Host "[3/6] Removing old files..."
-            if (Test-Path $deployPath) { Remove-Item -Recurse -Force "$deployPath\*" }
-            else { New-Item -ItemType Directory -Path $deployPath | Out-Null }
+            if (Test-Path $deployPath) {
+              Remove-Item -Recurse -Force "$deployPath\*"
+            } else {
+              New-Item -ItemType Directory -Path $deployPath | Out-Null
+            }
 
             Write-Host "[4/6] Copying new files..."
             Copy-Item -Recurse -Force "$sourcePath\*" $deployPath
+            Write-Host "      Files deployed."
 
             Write-Host "[5/6] Starting site and app pool..."
             Start-WebAppPool -Name $siteName
@@ -142,20 +137,24 @@ jobs:
             Write-Host "[6/6] Verifying..."
             $siteState    = (Get-WebSite    -Name $siteName).State
             $appPoolState = (Get-WebAppPool -Name $siteName).State
-            Write-Host "      Site: $siteState | App Pool: $appPoolState"
+            Write-Host "      Site     : $siteState"
+            Write-Host "      App Pool : $appPoolState"
 
             if ($siteState -eq "Started" -and $appPoolState -eq "Started") {
               Write-Host "=========================================="
-              Write-Host " SUCCESS — https://ouaail-stopwatch.ms-strategies.com"
+              Write-Host " SUCCESS - Site is LIVE"
+              Write-Host " https://ouaail-stopwatch.ms-strategies.com"
               Write-Host "=========================================="
+              exit 0
             } else {
-              Write-Error "FAILED — rolling back to $backupPath"
+              Write-Host "FAILED - Rolling back to $backupPath"
               Remove-Item -Recurse -Force "$deployPath\*"
-              Copy-Item -Recurse -Force "$backupPath\*" $deployPath
-              Start-WebAppPool -Name $siteName
-              Start-Sleep -Seconds 2
-              Start-WebSite    -Name $siteName
+              if (Test-Path $backupPath) {
+                Copy-Item -Recurse -Force "$backupPath\*" $deployPath
+                Start-WebAppPool -Name $siteName
+                Start-Sleep -Seconds 2
+                Start-WebSite    -Name $siteName
+                Write-Host "Rollback complete."
+              }
               exit 1
             }
-          }
-          Remove-PSSession $session
