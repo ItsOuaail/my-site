@@ -50,6 +50,9 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     steps:
+      - name: Checkout (for deploy.ps1)
+        uses: actions/checkout@v4
+
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
@@ -58,7 +61,7 @@ jobs:
       - name: Unzip published output
         run: unzip publish.zip
 
-      - name: Prepare incoming folder on SIRIUS1
+      - name: Prepare folders on SIRIUS1
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -67,7 +70,7 @@ jobs:
           port: 22
           script: powershell -Command "if (Test-Path 'C:\deployments\incoming') { Remove-Item -Recurse -Force 'C:\deployments\incoming' }; New-Item -ItemType Directory -Path 'C:\deployments\incoming' | Out-Null; if (!(Test-Path 'C:\deployments\backups')) { New-Item -ItemType Directory -Path 'C:\deployments\backups' | Out-Null }; Write-Host 'Folders ready.'"
 
-      - name: Upload files to SIRIUS1 via SCP
+      - name: Upload published app to SIRIUS1
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -78,90 +81,18 @@ jobs:
           target: "C:/deployments/incoming"
           strip_components: 1
 
-      - name: Write deploy.ps1 on SIRIUS1
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Upload deploy.ps1 to SIRIUS1
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: 22
-          script: |
-            powershell -Command "$content = @'
-            $ErrorActionPreference = 'Stop'
-            $siteName   = 'ouaail-stopwatch'
-            $deployPath = 'C:\inetpub\wwwroot\ouaail-stopwatch'
-            $sourcePath = 'C:\deployments\incoming'
-            $backupRoot = 'C:\deployments\backups'
-            $timestamp  = Get-Date -Format 'yyyyMMdd_HHmmss'
-            $backupPath = Join-Path $backupRoot ($siteName + '_' + $timestamp)
+          source: "scripts/deploy.ps1"
+          target: "C:/deployments"
+          strip_components: 1
 
-            Write-Host '=========================================='
-            Write-Host (' Deploying: ' + $siteName)
-            Write-Host (' Timestamp: ' + $timestamp)
-            Write-Host '=========================================='
-
-            Import-Module WebAdministration
-
-            Write-Host '[1/6] Stopping site and app pool...'
-            Stop-WebSite    -Name $siteName -ErrorAction SilentlyContinue
-            Stop-WebAppPool -Name $siteName -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 3
-
-            Write-Host '[2/6] Backing up current version...'
-            if (Test-Path $deployPath) {
-                Copy-Item -Recurse -Force $deployPath $backupPath
-                Write-Host ('      Backup saved: ' + $backupPath)
-            } else {
-                Write-Host '      No existing files, skipping backup.'
-            }
-
-            Write-Host '[3/6] Removing old files...'
-            if (Test-Path $deployPath) {
-                Get-ChildItem -Path $deployPath -Force | Remove-Item -Recurse -Force
-            } else {
-                New-Item -ItemType Directory -Path $deployPath | Out-Null
-            }
-
-            Write-Host '[4/6] Copying new files from incoming...'
-            $items = Get-ChildItem -Path $sourcePath -Force
-            Write-Host ('      Found ' + $items.Count + ' items in source')
-            foreach ($item in $items) {
-                Copy-Item -Path $item.FullName -Destination $deployPath -Recurse -Force
-            }
-            $deployedItems = Get-ChildItem -Path $deployPath -Force
-            Write-Host ('      ' + $deployedItems.Count + ' items now in deploy path')
-
-            Write-Host '[5/6] Starting app pool and site...'
-            Start-WebAppPool -Name $siteName
-            Start-Sleep -Seconds 3
-            Start-WebSite    -Name $siteName
-            Start-Sleep -Seconds 2
-
-            Write-Host '[6/6] Verifying...'
-            $siteState = (Get-WebSite    -Name $siteName).State
-            $poolState = (Get-WebAppPool -Name $siteName).State
-            Write-Host ('      Site: ' + $siteState + ' | Pool: ' + $poolState)
-
-            if ($siteState -eq 'Started' -and $poolState -eq 'Started') {
-                Write-Host '=========================================='
-                Write-Host ' SUCCESS - Site is LIVE'
-                Write-Host ' https://ouaail-stopwatch.ms-strategies.com'
-                Write-Host '=========================================='
-                exit 0
-            } else {
-                Write-Error 'FAILED - rolling back'
-                Get-ChildItem -Path $deployPath -Force | Remove-Item -Recurse -Force
-                if (Test-Path $backupPath) {
-                    Copy-Item -Path ($backupPath + '\*') -Destination $deployPath -Recurse -Force
-                    Start-WebAppPool -Name $siteName
-                    Start-Sleep -Seconds 2
-                    Start-WebSite    -Name $siteName
-                }
-                exit 1
-            }
-            '@; Set-Content -Path 'C:\deployments\deploy.ps1' -Value $content -Encoding UTF8; Write-Host 'deploy.ps1 written.'"
-
-      - name: Run deploy.ps1 on SIRIUS1
+      - name: Execute deploy.ps1 on SIRIUS1
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
