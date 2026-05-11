@@ -55,8 +55,10 @@ Start-WebSite    -Name $siteName
 Start-Sleep -Seconds 2
 
 Write-Host '[6/6] Verifying...'
-$siteState = (Get-WebSite    -Name $siteName).State
-$poolState = (Get-WebAppPool -Name $siteName).State
+Import-Module WebAdministration -Force
+Start-Sleep -Seconds 2
+$siteState = (Get-Item ("IIS:\Sites\" + $siteName)).State
+$poolState = (Get-Item ("IIS:\AppPools\" + $siteName)).State
 Write-Host ('      Site: ' + $siteState + ' | Pool: ' + $poolState)
 
 if ($siteState -eq 'Started' -and $poolState -eq 'Started') {
