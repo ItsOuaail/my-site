@@ -69,6 +69,8 @@ jobs:
           SERVER_USER:     ${{ secrets.SERVER_USER }}
           SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
         run: |
+          winrm set winrm/config/client '@{AllowUnencrypted="true"}'
+          winrm set winrm/config/client/auth '@{Basic="true"}'
           $password   = ConvertTo-SecureString $env:SERVER_PASSWORD -AsPlainText -Force
           $credential = New-Object System.Management.Automation.PSCredential($env:SERVER_USER, $password)
           $sessionOptions = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
