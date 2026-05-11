@@ -77,8 +77,7 @@ jobs:
           source: "publish/*"
           target: "C:/deployments/incoming"
           strip_components: 1
-          overwrite: true
-
+          
       - name: Run deployment script on SIRIUS1 via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
