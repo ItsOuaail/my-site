@@ -1,6 +1,6 @@
 # my-site — StopwatchApp CI/CD Pipeline
 
-Automated deployment of StopwatchApp to IIS on SIRIUS1 via GitHub Actions + WinRM.
+Automated deployment of StopwatchApp to IIS on SIRIUS1 via GitHub Actions.
 
 ## Stack
 - **App:** ASP.NET Core 8 / Blazor Server
